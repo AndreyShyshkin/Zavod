@@ -1,0 +1,7 @@
+factory
+*.o
+breaks.log
+/tmp/factory_qc_fifo
+.DS_Store
+.idea/
+EOF
