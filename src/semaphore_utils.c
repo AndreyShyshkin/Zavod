@@ -33,7 +33,7 @@ static pid_t g_creator_pid = 0;
 #define MAX_TRACKED_WORKERS 32
 
 /* Масив збереження часу виходу на перерву для кожного робітника */
-static time_t g_worker_start_times[MAX_TRACKED_WORKERS] = {0};
+static struct timespec g_worker_start_times[MAX_TRACKED_WORKERS] = {{0, 0}};
 
 /*
  * Допоміжна функція детального виводу помилки для системних викликів семафорів
@@ -118,12 +118,13 @@ int leave_for_break(int worker_id) {
         return ZAVOD_ERR_SEM;
     }
 
-    /* Фіксуємо поточний системний час початку перерви */
-    time_t start_time = time(NULL);
-    g_worker_start_times[worker_id] = start_time;
+    /* Фіксуємо точний системний час початку перерви з наносекундною точністю */
+    struct timespec start_ts;
+    clock_gettime(CLOCK_REALTIME, &start_ts);
+    g_worker_start_times[worker_id] = start_ts;
 
     /* Вивід статусу в термінал для наочності */
-    printf("[СЕМАФОР] Робітник #%d пішов на перерву (кімната відпочинку зайнята).\n", worker_id);
+    printf("[СЕМАФОР] Робітник #%-2d пішов на перерву (кімната відпочинку зайнята).\n", worker_id);
     fflush(stdout);
 
     return ZAVOD_SUCCESS;
@@ -146,37 +147,45 @@ int return_from_break(int worker_id) {
     }
 
     /* Фіксуємо час повернення */
-    time_t end_time = time(NULL);
+    struct timespec end_ts;
+    clock_gettime(CLOCK_REALTIME, &end_ts);
 
     /* Отримуємо час початку перерви для цього робітника */
-    time_t start_time = end_time;
-    if (worker_id >= 0 && worker_id < MAX_TRACKED_WORKERS && g_worker_start_times[worker_id] != 0) {
-        start_time = g_worker_start_times[worker_id];
-        g_worker_start_times[worker_id] = 0; /* Скидаємо збережений час */
+    struct timespec start_ts = end_ts;
+    if (worker_id >= 0 && worker_id < MAX_TRACKED_WORKERS && g_worker_start_times[worker_id].tv_sec != 0) {
+        start_ts = g_worker_start_times[worker_id];
+        g_worker_start_times[worker_id].tv_sec = 0;
+        g_worker_start_times[worker_id].tv_nsec = 0;
     }
 
-    /* Форматуємо часові мітки за допомогою time(), localtime(), strftime() */
+    /* Форматуємо часові мітки з точністю до мілісекунд за допомогою localtime_r та strftime */
     char start_str[64];
     char end_str[64];
 
-    struct tm *tm_start = localtime(&start_time);
+    struct tm tm_start_buf;
+    struct tm *tm_start = localtime_r(&start_ts.tv_sec, &tm_start_buf);
     if (tm_start != NULL) {
-        strftime(start_str, sizeof(start_str), "%Y-%m-%d %H:%M:%S", tm_start);
+        char base_start[32];
+        strftime(base_start, sizeof(base_start), "%Y-%m-%d %H:%M:%S", tm_start);
+        snprintf(start_str, sizeof(start_str), "%s.%03ld", base_start, start_ts.tv_nsec / 1000000L);
     } else {
         snprintf(start_str, sizeof(start_str), "Невідомо");
     }
 
-    struct tm *tm_end = localtime(&end_time);
+    struct tm tm_end_buf;
+    struct tm *tm_end = localtime_r(&end_ts.tv_sec, &tm_end_buf);
     if (tm_end != NULL) {
-        strftime(end_str, sizeof(end_str), "%Y-%m-%d %H:%M:%S", tm_end);
+        char base_end[32];
+        strftime(base_end, sizeof(base_end), "%Y-%m-%d %H:%M:%S", tm_end);
+        snprintf(end_str, sizeof(end_str), "%s.%03ld", base_end, end_ts.tv_nsec / 1000000L);
     } else {
         snprintf(end_str, sizeof(end_str), "Невідомо");
     }
 
-    /* Формуємо стандартизований запис для журналу перерв */
+    /* Формуємо стандартизований вирівняний запис для журналу перерв */
     char log_entry[256];
     int entry_len = snprintf(log_entry, sizeof(log_entry),
-                             "[Робітник %d] Вихід: %s — Повернення: %s\n",
+                             "[Робітник %-2d]  Вихід: %s  —  Повернення: %s\n",
                              worker_id, start_str, end_str);
 
     /*
