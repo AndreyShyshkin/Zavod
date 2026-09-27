@@ -83,16 +83,25 @@ $(TEST_BIN): $(TEST_DIR)/test_semaphores.c $(COMMON_OBJS)
 test: $(TEST_BIN)
 	./$(TEST_BIN)
 
-# Повне очищення бінарних файлів, об'єктних файлів, логів та IPC-ресурсів
-clean:
-	@echo "Видалення скомпільованих файлів та логів..."
+# Очищення виключно IPC-ресурсів (POSIX та System V)
+clean-ipc:
+	@echo "Очищення іменованих каналів FIFO (/tmp/zavod_fifo)..."
+	@rm -f /tmp/zavod_fifo /tmp/factory_qc_fifo /tmp/zavod_* /tmp/factory_* 2>/dev/null || true
+	@echo "Очищення іменованих POSIX-семафорів (/dev/shm)..."
+	@rm -f /dev/shm/sem.zavod_break_sem /dev/shm/sem.factory_break_room /dev/shm/sem.zavod_* 2>/dev/null || true
+	@echo "Очищення іменованих черг повідомлень POSIX (/dev/mqueue)..."
+	@rm -f /dev/mqueue/zavod_metrics_mq /dev/mqueue/factory_metrics_mq /dev/mqueue/zavod_* 2>/dev/null || true
+	@echo "Очищення залишків черг та семафорів System V через ipcrm..."
+	@-for qid in $$(ipcs -q 2>/dev/null | awk '$$2 ~ /^[0-9]+$$/ {print $$2}'); do ipcrm -q $$qid 2>/dev/null || true; done
+	@-for sid in $$(ipcs -s 2>/dev/null | awk '$$2 ~ /^[0-9]+$$/ {print $$2}'); do ipcrm -s $$sid 2>/dev/null || true; done
+	@echo "IPC-ресурси успішно очищено."
+
+# Повне очищення бінарних файлів, об'єктних модулів, логів та всіх IPC-ресурсів
+clean: clean-ipc
+	@echo "Видалення скомпільованих бінарних файлів, тестів та логів..."
 	rm -rf $(TARGET) $(PARENT_BIN) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_BIN) $(OBJ_DIR)
-	rm -f breaks.log break_log.txt /tmp/factory_qc_fifo /tmp/zavod_fifo
-	@echo "Видалення системних семафорів із /dev/shm..."
-	rm -f /dev/shm/sem.zavod_break_sem /dev/shm/sem.factory_break_room
-	@echo "Очищення залишків System V IPC через ipcrm (у разі наявності)..."
-	-ipcrm -a 2>/dev/null || true
-	@echo "Очищення завершено успішно."
+	rm -f breaks.log break_log.txt
+	@echo "Повне очищення середовища завершено успішно."
 
 # Команди для роботи в Docker-контейнері
 docker-build:
@@ -110,4 +119,4 @@ docker-run:
 		-v "$$(pwd)":/workspace \
 		$(IMAGE_NAME) bash -c "make clean && make && ./$(TARGET) 10"
 
-.PHONY: all asan clean parent worker1 worker2 test docker-build docker-shell docker-run
+.PHONY: all asan clean clean-ipc parent worker1 worker2 test docker-build docker-shell docker-run
