@@ -86,6 +86,13 @@ int init_break_semaphore(void) {
  * Захоплення семафора (вихід робітника на перерву).
  */
 int leave_for_break(int worker_id) {
+    /* Валідація ідентифікатора робітника */
+    if (worker_id <= 0 || worker_id >= MAX_TRACKED_WORKERS) {
+        fprintf(stderr, "[ПОМИЛКА ВАЛІДАЦІЇ] Некоректний ідентифікатор робітника: %d (допустимо: 1..%d).\n",
+                worker_id, MAX_TRACKED_WORKERS - 1);
+        return ZAVOD_ERR_INVALID_ARG;
+    }
+
     if (g_break_sem == SEM_FAILED) {
         if (init_break_semaphore() != ZAVOD_SUCCESS) {
             return ZAVOD_ERR_SEM;
@@ -113,9 +120,7 @@ int leave_for_break(int worker_id) {
 
     /* Фіксуємо поточний системний час початку перерви */
     time_t start_time = time(NULL);
-    if (worker_id >= 0 && worker_id < MAX_TRACKED_WORKERS) {
-        g_worker_start_times[worker_id] = start_time;
-    }
+    g_worker_start_times[worker_id] = start_time;
 
     /* Вивід статусу в термінал для наочності */
     printf("[СЕМАФОР] Робітник #%d пішов на перерву (кімната відпочинку зайнята).\n", worker_id);
@@ -128,6 +133,13 @@ int leave_for_break(int worker_id) {
  * Повернення робітника з перерви, атомарне логування та звільнення семафора.
  */
 int return_from_break(int worker_id) {
+    /* Валідація ідентифікатора робітника */
+    if (worker_id <= 0 || worker_id >= MAX_TRACKED_WORKERS) {
+        fprintf(stderr, "[ПОМИЛКА ВАЛІДАЦІЇ] Некоректний ідентифікатор робітника: %d (допустимо: 1..%d).\n",
+                worker_id, MAX_TRACKED_WORKERS - 1);
+        return ZAVOD_ERR_INVALID_ARG;
+    }
+
     if (g_break_sem == SEM_FAILED) {
         fprintf(stderr, "[ПОМИЛКА] Спроба повернутися з перерви без ініціалізованого семафора.\n");
         return ZAVOD_ERR_SEM;
