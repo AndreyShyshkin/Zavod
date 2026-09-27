@@ -1,27 +1,98 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+/*
+ * Спільна інфраструктура та визначення для системи "Завод" (Line Quality Control).
+ * Містить константи IPC, структури даних та коди помилок.
+ * 
+ * Усі коментарі оформлені українською мовою згідно зі стандартами проєкту.
+ */
+
 #include <stdint.h>
+#include <stdbool.h>
+#include <sys/types.h>
+#include <time.h>
+#include <unistd.h>
 
-#define FIFO_PATH "/tmp/factory_qc_fifo"
-#define MQ_NAME   "/factory_metrics_mq"
-#define SEM_NAME  "/factory_break_room"
-#define LOG_FILE  "breaks.log"
+/* ========================================================================= */
+/* КОНСТАНТИ МІЖПРОЦЕСНОЇ ВЗАЄМОДІЇ (IPC)                                   */
+/* ========================================================================= */
 
+/* Шлях до іменованого каналу (FIFO) для передачі проміжних виробів */
+#define FIFO_PATH           "/tmp/zavod_fifo"
+#define FACTORY_QC_FIFO     FIFO_PATH  /* Аліас для сумісності з початковим прототипом */
+
+/* Імена та ключі для черги повідомлень */
+#define MQ_NAME             "/zavod_metrics_mq"
+#define FACTORY_METRICS_MQ  MQ_NAME    /* Аліас для сумісності */
+
+/* Токени та шляхи для генерації ключів ftok (для System V IPC за потреби) */
+#define FTOK_PATH           "/tmp"
+#define FTOK_PROJ_ID_MSG    'M'
+#define FTOK_PROJ_ID_SEM    'S'
+
+/* Ім'я POSIX іменованого семафора для контролю перерв */
+#define SEM_NAME            "/zavod_break_sem"
+#define FACTORY_BREAK_ROOM  SEM_NAME   /* Аліас для сумісності */
+#define SEM_PERMS           0644
+
+/* Лог-файл фіксації виходів на перерву */
+#define LOG_FILE            "break_log.txt"
+#define BREAKS_LOG          LOG_FILE   /* Аліас для сумісності */
+
+/* ========================================================================= */
+/* ІДЕНТИФІКАТОРИ РОБІТНИКІВ ТА ПАРАМЕТРИ СИСТЕМИ                          */
+/* ========================================================================= */
+
+#define SUPERVISOR_ID       0  /* Батьківський процес (керівник зміни) */
+#define WORKER_INSPECTOR_ID 1  /* Дочірній процес 1 (перевіряючий, Issue #2) */
+#define WORKER_TESTER_ID    2  /* Дочірній процес 2 (тестувальник, Issue #3) */
+
+/* Константи для оцінки браку */
+#define QUALITY_SCORE_DEFECT_THRESHOLD 50  /* Поріг якості: менше 50 — брак */
+#define DEFAULT_DEFECT_PROBABILITY     15  /* Ймовірність браку за замовчуванням (15%) */
+
+/* Коди помилок системи */
 typedef enum {
-    STATUS_DEFECT = 0,
-    STATUS_STANDARD = 1
+    ZAVOD_SUCCESS          = 0,   /* Успішне виконання */
+    ZAVOD_ERR_FIFO         = -1,  /* Помилка роботи з FIFO */
+    ZAVOD_ERR_SEM          = -2,  /* Помилка ініціалізації чи захоплення семафора */
+    ZAVOD_ERR_MQ           = -3,  /* Помилка черги повідомлень */
+    ZAVOD_ERR_FORK         = -4,  /* Помилка створення дочірнього процесу */
+    ZAVOD_ERR_FILE         = -5,  /* Помилка відкриття чи запису в файл */
+    ZAVOD_ERR_INVALID_ARG  = -6   /* Некоректні аргументи */
+} ZavodErrorCode;
+
+/* ========================================================================= */
+/* СТРУКТУРИ ДАНИХ                                                           */
+/* ========================================================================= */
+
+/* Статус перевірки виробу */
+typedef enum {
+    STATUS_DEFECT = 0,    /* Брак (виріб не відповідає нормам) */
+    STATUS_STANDARD = 1   /* Стандарт (придатний виріб) */
 } ItemStatus;
 
+/* Проміжний виріб, що передається через FIFO від перевіряючого до тестувальника */
 typedef struct {
-    uint32_t serial_number;
-    ItemStatus status;
+    uint32_t serial_number;  /* Унікальний серійний номер виробу */
+    ItemStatus status;       /* Статус первинного візуального огляду */
 } IntermediateItem;
 
+/* Фінальна метрика виробу, що надсилається керівнику через чергу повідомлень */
 typedef struct {
-    uint32_t serial_number;
-    uint8_t quality_score;
+    uint32_t serial_number;  /* Унікальний серійний номер виробу */
+    uint8_t quality_score;   /* Оцінка якості за 100-бальною шкалою (0-100) */
 } FinalMetric;
 
-#endif /* COMMON_H */
+/* Максимальна довжина текстового повідомлення у черзі */
+#define MSG_BUFFER_TEXT_LEN 256
 
+/* Структура повідомлення для передачі через чергу повідомлень */
+struct msg_buffer {
+    long msg_type;                       /* Тип повідомлення (наприклад, 1 - метрика, 2 - зупинка) */
+    char msg_text[MSG_BUFFER_TEXT_LEN];  /* Текстовий супровід / опис стану */
+    FinalMetric metric;                  /* Корисне навантаження: фінальна метрика */
+};
+
+#endif /* COMMON_H */
