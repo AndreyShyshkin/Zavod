@@ -8,6 +8,9 @@ CC = gcc
 CFLAGS = -Wall -Wextra -pedantic -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude
 LDFLAGS = -lrt -pthread
 
+# Прапорці санітайзерів для динамічного аналізу пам'яті (AddressSanitizer та UBSan)
+ASAN_FLAGS = -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -g
+
 # Назви виконуваних файлів
 TARGET = factory
 PARENT_BIN = parent
@@ -44,6 +47,12 @@ $(OBJ_DIR)/main.o: $(SRC_DIR)/main.c $(INC_DIR)/common.h | $(OBJ_DIR)
 # Збирання головної програми фабрики
 $(TARGET): $(OBJ_DIR)/main.o $(COMMON_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# Збирання проєкту з увімкненим AddressSanitizer для пошуку переповнень і витоків
+asan: CFLAGS += $(ASAN_FLAGS)
+asan: LDFLAGS += $(ASAN_FLAGS)
+asan: clean $(OBJ_DIR) $(TARGET) $(TEST_BIN)
+	@echo "Збирання з AddressSanitizer успішно завершено."
 
 # Ціль для батьківського процесу (керівник)
 parent: $(TARGET)
@@ -101,4 +110,4 @@ docker-run:
 		-v "$$(pwd)":/workspace \
 		$(IMAGE_NAME) bash -c "make clean && make && ./$(TARGET) 10"
 
-.PHONY: all clean parent worker1 worker2 test docker-build docker-shell docker-run
+.PHONY: all asan clean parent worker1 worker2 test docker-build docker-shell docker-run
