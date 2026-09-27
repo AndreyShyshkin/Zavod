@@ -18,6 +18,8 @@ WORKER1_BIN = worker1
 WORKER2_BIN = worker2
 TEST_BIN = test_semaphores
 
+STRESS_BIN = test_break_stress
+
 # Директорії проєкту
 SRC_DIR = src
 INC_DIR = include
@@ -51,7 +53,7 @@ $(TARGET): $(OBJ_DIR)/main.o $(COMMON_OBJS)
 # Збирання проєкту з увімкненим AddressSanitizer для пошуку переповнень і витоків
 asan: CFLAGS += $(ASAN_FLAGS)
 asan: LDFLAGS += $(ASAN_FLAGS)
-asan: clean $(OBJ_DIR) $(TARGET) $(TEST_BIN)
+asan: clean $(OBJ_DIR) $(TARGET) $(TEST_BIN) $(STRESS_BIN)
 	@echo "Збирання з AddressSanitizer успішно завершено."
 
 # Ціль для батьківського процесу (керівник)
@@ -75,13 +77,24 @@ worker2: $(COMMON_OBJS)
 		echo "Файл $(SRC_DIR)/worker2.c очікується від колеги (Issue #3)."; \
 	fi
 
-# Ціль для збирання тестового стенду семафорів
+# Ціль для збирання базового тестового стенду семафорів
 $(TEST_BIN): $(TEST_DIR)/test_semaphores.c $(COMMON_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
-# Тестування модуля семафорів
-test: $(TEST_BIN)
+# Ціль для збирання стрес-тесту семафорів
+$(STRESS_BIN): $(TEST_DIR)/test_break_stress.c $(COMMON_OBJS)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
+# Автоматичний запуск усіх інтеграційних та стрес-тестів
+test: $(TEST_BIN) $(STRESS_BIN)
+	@echo "\n>>> Запуск базового тесту семафорів..."
 	./$(TEST_BIN)
+	@echo "\n>>> Запуск стрес-тесту конкурентності..."
+	./$(STRESS_BIN)
+	@echo "\n>>> Усі тести пройдено успішно!"
+
+# Синонім для test
+run-tests: test
 
 # Очищення виключно IPC-ресурсів (POSIX та System V)
 clean-ipc:
@@ -99,7 +112,7 @@ clean-ipc:
 # Повне очищення бінарних файлів, об'єктних модулів, логів та всіх IPC-ресурсів
 clean: clean-ipc
 	@echo "Видалення скомпільованих бінарних файлів, тестів та логів..."
-	rm -rf $(TARGET) $(PARENT_BIN) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_BIN) $(OBJ_DIR)
+	rm -rf $(TARGET) $(PARENT_BIN) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_BIN) $(STRESS_BIN) $(OBJ_DIR)
 	rm -f breaks.log break_log.txt
 	@echo "Повне очищення середовища завершено успішно."
 
@@ -119,4 +132,4 @@ docker-run:
 		-v "$$(pwd)":/workspace \
 		$(IMAGE_NAME) bash -c "make clean && make && ./$(TARGET) 10"
 
-.PHONY: all asan clean clean-ipc parent worker1 worker2 test docker-build docker-shell docker-run
+.PHONY: all asan clean clean-ipc parent worker1 worker2 test run-tests docker-build docker-shell docker-run
