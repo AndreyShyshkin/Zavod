@@ -5,6 +5,7 @@
  * 1. Гарантію того, що в кімнаті відпочинку одночасно перебуває не більше одного робітника.
  * 2. Атомарне логування виходів та повернень у файл break_log.txt через прапорець O_APPEND.
  * 3. Безпечне створення, закриття та видалення семафора на рівні ядра ОС.
+ * 4. Розширену діагностику системних помилок через errno.
  * 
  * Усі коментарі в коді виконано українською мовою.
  */
@@ -35,6 +36,16 @@ static pid_t g_creator_pid = 0;
 static time_t g_worker_start_times[MAX_TRACKED_WORKERS] = {0};
 
 /*
+ * Допоміжна функція детального виводу помилки для системних викликів семафорів
+ */
+static void log_sem_error(const char *operation, int err_code) {
+    char err_buf[256];
+    strerror_r(err_code, err_buf, sizeof(err_buf));
+    fprintf(stderr, "[ПОМИЛКА СЕМАФОРА] Операція '%s' зазнала невдачі (код %d: %s)\n",
+            operation, err_code, err_buf);
+}
+
+/*
  * Ініціалізація іменованого семафора перерв.
  * Відкриває або створює семафор із правами 0644 та початковим значенням 1.
  */
@@ -51,7 +62,15 @@ int init_break_semaphore(void) {
      */
     g_break_sem = sem_open(SEM_NAME, O_CREAT, SEM_PERMS, 1);
     if (g_break_sem == SEM_FAILED) {
-        perror("[ПОМИЛКА] Не вдалося відкрити/створити семафор sem_open");
+        int err = errno;
+        log_sem_error("sem_open", err);
+        if (err == EACCES) {
+            fprintf(stderr, "[ДІАГНОСТИКА] Відмовлено в доступі до семафора %s.\n", SEM_NAME);
+        } else if (err == ENFILE || err == EMFILE) {
+            fprintf(stderr, "[ДІАГНОСТИКА] Перевищено ліміт відкритих дескрипторів у системі або процесі.\n");
+        } else if (err == ENOSPC) {
+            fprintf(stderr, "[ДІАГНОСТИКА] Недостатньо пам'яті для розміщення нового семафора в системі.\n");
+        }
         return ZAVOD_ERR_SEM;
     }
 
@@ -78,10 +97,17 @@ int leave_for_break(int worker_id) {
      * Обробляємо випадок переривання системного виклику сигналом (EINTR).
      */
     while (sem_wait(g_break_sem) == -1) {
-        if (errno == EINTR) {
-            continue; /* Перервано сигналом — повторюємо спробу */
+        int err = errno;
+        if (err == EINTR) {
+            /* Системний виклик було перервано сигналом — повторюємо спробу */
+            continue;
         }
-        perror("[ПОМИЛКА] Помилка виконання sem_wait");
+        log_sem_error("sem_wait", err);
+        if (err == EINVAL) {
+            fprintf(stderr, "[ДІАГНОСТИКА] Семафор не є валідним або вказує на пошкоджену пам'ять.\n");
+        } else if (err == EDEADLK) {
+            fprintf(stderr, "[ДІАГНОСТИКА] Виявлено взаємне блокування (дедлок) при спробі захоплення семафора.\n");
+        }
         return ZAVOD_ERR_SEM;
     }
 
@@ -153,12 +179,21 @@ int return_from_break(int worker_id) {
         if (entry_len > 0) {
             ssize_t written = write(log_fd, log_entry, (size_t)entry_len);
             if (written < 0) {
-                perror("[ПОМИЛКА] Не вдалося записати в лог-файл");
+                int write_err = errno;
+                fprintf(stderr, "[ПОМИЛКА ЗАПИСУ] Не вдалося записати в лог-файл (errno %d: %s)\n",
+                        write_err, strerror(write_err));
+            } else if (written < (ssize_t)entry_len) {
+                fprintf(stderr, "[УВАГА] Неповний запис у лог: записано %zd з %d байтів.\n",
+                        written, entry_len);
             }
         }
-        close(log_fd);
+        if (close(log_fd) == -1) {
+            perror("[ПОМИЛКА] Не вдалося коректно закрити дескриптор лог-файлу");
+        }
     } else {
-        perror("[ПОМИЛКА] Не вдалося відкрити файл журналу break_log.txt");
+        int open_err = errno;
+        fprintf(stderr, "[ПОМИЛКА ФАЙЛУ] Не вдалося відкрити %s (errno %d: %s)\n",
+                LOG_FILE, open_err, strerror(open_err));
     }
 
     /*
@@ -166,7 +201,11 @@ int return_from_break(int worker_id) {
      * Тепер інший робітник може зайти в кімнату відпочинку.
      */
     if (sem_post(g_break_sem) == -1) {
-        perror("[ПОМИЛКА] Помилка виконання sem_post");
+        int post_err = errno;
+        log_sem_error("sem_post", post_err);
+        if (post_err == EOVERFLOW) {
+            fprintf(stderr, "[ДІАГНОСТИКА] Переповнення лічильника семафора (перевищено SEM_VALUE_MAX).\n");
+        }
         return ZAVOD_ERR_SEM;
     }
 
@@ -185,7 +224,8 @@ int cleanup_break_semaphore(void) {
 
     if (g_break_sem != SEM_FAILED) {
         if (sem_close(g_break_sem) == -1) {
-            perror("[ПОМИЛКА] Не вдалося закрити семафор sem_close");
+            int close_err = errno;
+            log_sem_error("sem_close", close_err);
             result = ZAVOD_ERR_SEM;
         }
         g_break_sem = SEM_FAILED;
@@ -206,8 +246,9 @@ int cleanup_break_semaphore(void) {
  */
 int unlink_break_semaphore(void) {
     if (sem_unlink(SEM_NAME) == -1) {
-        if (errno != ENOENT) {
-            perror("[ПОМИЛКА] Не вдалося видалити семафор sem_unlink");
+        int unlink_err = errno;
+        if (unlink_err != ENOENT) {
+            log_sem_error("sem_unlink", unlink_err);
             return ZAVOD_ERR_SEM;
         }
     }
