@@ -6,7 +6,12 @@
 # Компілятор та прапорці компіляції (стандарт C11, суворі попередження)
 CC = gcc
 CFLAGS = -Wall -Wextra -pedantic -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude
-LDFLAGS = -lrt -pthread
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+    LDFLAGS = -lrt -pthread
+else
+    LDFLAGS = -pthread
+endif
 
 # Прапорці санітайзерів для динамічного аналізу пам'яті (AddressSanitizer та UBSan)
 ASAN_FLAGS = -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -g
