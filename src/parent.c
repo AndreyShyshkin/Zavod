@@ -393,3 +393,110 @@ ZavodErrorCode launch_workers(int pipe_fd[2], pid_t *out_pid1, pid_t *out_pid2) 
 
     return ZAVOD_SUCCESS;
 }
+
+/**
+ * @brief Читає в циклі повідомлення з черги IPC, виводить результати та рахує статистику.
+ * @param msqid Дескриптор черги повідомлень System V.
+ * @param pid2 PID процесу Робітника 2 (для моніторингу його завершення).
+ * @param total_count Загальна запланована кількість виробів (N).
+ * @param out_passed Вказівник для збереження кількості протестованих/пройдених деталей.
+ * @param out_defects Вказівник для збереження кількості відсіяного браку.
+ * @return ZAVOD_SUCCESS у разі успіху, відповідний код помилки при збої.
+ */
+ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, int *out_passed, int *out_defects) {
+    if (msqid < 0 || total_count <= 0 || out_passed == NULL || out_defects == NULL) {
+        fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Некоректні аргументи у read_results_from_queue.\n");
+        return ZAVOD_ERR_INVALID_ARG;
+    }
+
+    *out_passed = 0;
+    *out_defects = 0;
+
+    printf("[КЕРІВНИК] Очікування та зчитування результатів тестування з черги повідомлень (msqid: %d)...\n", msqid);
+    fflush(stdout);
+
+    struct msg_buffer msg;
+    bool worker2_finished = false;
+
+    while (1) {
+        /*
+         * Використовуємо IPC_NOWAIT для неблокуючого опитування черги
+         * із паралельною перевіркою життєздатності процесу Робітника 2.
+         */
+        ssize_t res = msgrcv(msqid, &msg, sizeof(struct msg_buffer) - sizeof(long), 0, IPC_NOWAIT);
+
+        if (res > 0) {
+            /* Отримано повідомлення з черги */
+            if (msg.msg_type == MSG_TYPE_STOP) {
+                printf("[КЕРІВНИК] Отримано маркер завершення передачі (MSG_TYPE_STOP) від Робітника 2.\n");
+                fflush(stdout);
+                break;
+            }
+
+            if (msg.msg_type == MSG_TYPE_METRIC) {
+                (*out_passed)++;
+                uint32_t serial = msg.metric.serial_number;
+                uint8_t score = msg.metric.quality_score;
+
+                printf("[КЕРІВНИК - РЕЗУЛЬТАТ] Виріб #%d: серійний номер = %u, оцінка якості = %u/100 (статус: %s)%s%s\n",
+                       *out_passed, serial, score,
+                       (score >= QUALITY_SCORE_DEFECT_THRESHOLD ? "СТАНДАРТ" : "БРАК"),
+                       (msg.msg_text[0] != '\0' ? " | Опис: " : ""),
+                       (msg.msg_text[0] != '\0' ? msg.msg_text : ""));
+                fflush(stdout);
+
+                if (*out_passed >= total_count) {
+                    /* Отримано результати для всіх виробів партії */
+                    break;
+                }
+            }
+        } else {
+            /* Якщо msgrcv повернув помилку */
+            if (errno == ENOMSG) {
+                /* Черга наразі порожня. Перевіряємо стан процесу Робітника 2 */
+                if (pid2 > 0) {
+                    int status = 0;
+                    pid_t wait_res = waitpid(pid2, &status, WNOHANG);
+                    if (wait_res == pid2) {
+                        /* Робітник 2 завершив роботу. Дренуємо останні можливі залишки і виходимо */
+                        worker2_finished = true;
+                        while (msgrcv(msqid, &msg, sizeof(struct msg_buffer) - sizeof(long), 0, IPC_NOWAIT) > 0) {
+                            if (msg.msg_type == MSG_TYPE_METRIC) {
+                                (*out_passed)++;
+                                printf("[КЕРІВНИК - РЕЗУЛЬТАТ] Виріб #%d: серійний номер = %u, оцінка якості = %u/100\n",
+                                       *out_passed, msg.metric.serial_number, msg.metric.quality_score);
+                                fflush(stdout);
+                            }
+                        }
+                        break;
+                    }
+                }
+
+                if (worker2_finished) {
+                    break;
+                }
+
+                /* Коротка пауза (10 мс) перед наступною перевіркою черги */
+                usleep(10000);
+            } else if (errno == EINTR) {
+                /* Системний виклик перервано сигналом */
+                continue;
+            } else {
+                /* Інша помилка черги (наприклад, видалення або відсутність доступу) */
+                perror("[КЕРІВНИК - ПОМИЛКА] Помилка читання з черги msgrcv");
+                break;
+            }
+        }
+    }
+
+    /* Визначаємо кількість відсіяного браку */
+    *out_defects = total_count - *out_passed;
+    if (*out_defects < 0) {
+        *out_defects = 0;
+    }
+
+    printf("[КЕРІВНИК] Зчитування черги повідомлень завершено. Успішно отримано: %d виробів.\n", *out_passed);
+    fflush(stdout);
+
+    return ZAVOD_SUCCESS;
+}

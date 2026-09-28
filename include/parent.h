@@ -79,4 +79,15 @@ int init_message_queue(void);
  */
 ZavodErrorCode launch_workers(int pipe_fd[2], pid_t *out_pid1, pid_t *out_pid2);
 
+/**
+ * @brief Читає в циклі повідомлення з черги IPC, виводить результати та рахує статистику.
+ * @param msqid Дескриптор черги повідомлень System V.
+ * @param pid2 PID процесу Робітника 2 (для моніторингу його завершення).
+ * @param total_count Загальна запланована кількість виробів (N).
+ * @param out_passed Вказівник для збереження кількості протестованих/пройдених деталей.
+ * @param out_defects Вказівник для збереження кількості відсіяного браку.
+ * @return ZAVOD_SUCCESS у разі успіху, відповідний код помилки при збої.
+ */
+ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, int *out_passed, int *out_defects);
+
 #endif /* PARENT_H */
