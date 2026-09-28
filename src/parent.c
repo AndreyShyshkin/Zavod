@@ -162,3 +162,32 @@ ZavodErrorCode parse_arguments(int argc, char *argv[], int *out_count) {
     *out_count = (int)val;
     return ZAVOD_SUCCESS;
 }
+
+/**
+ * @brief Ініціалізує генератор випадкових чисел керівника зерном (time ^ pid).
+ */
+void init_random_generator(void) {
+    srand((unsigned int)(time(NULL) ^ getpid()));
+}
+
+/**
+ * @brief Генерує унікальний псевдовипадковий серійний номер виробу.
+ * @param index Порядковий номер деталі на конвеєрі (1..N).
+ * @return Згенерований серійний номер uint32_t.
+ */
+uint32_t generate_serial_number(uint32_t index) {
+    static bool seeded = false;
+    if (!seeded) {
+        init_random_generator();
+        seeded = true;
+    }
+
+    /*
+     * Формуємо унікальний серійний номер:
+     * Базова частина: порядковий номер * 1000.
+     * Випадкова складова: псевдовипадкове число [100..999].
+     * Це гарантує взаємну унікальність для кожного виробу в партії.
+     */
+    uint32_t random_part = (uint32_t)(rand() % 900 + 100);
+    return (index * 1000U) + random_part;
+}

@@ -37,4 +37,16 @@ ZavodErrorCode setup_signal_handlers(void);
  */
 ZavodErrorCode wait_for_workers_ready(void);
 
+/**
+ * @brief Ініціалізує генератор випадкових чисел керівника зерном (time ^ pid).
+ */
+void init_random_generator(void);
+
+/**
+ * @brief Генерує унікальний псевдовипадковий серійний номер виробу.
+ * @param index Порядковий номер деталі на конвеєрі (1..N).
+ * @return Згенерований серійний номер uint32_t.
+ */
+uint32_t generate_serial_number(uint32_t index);
+
 #endif /* PARENT_H */
