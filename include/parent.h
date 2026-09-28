@@ -49,4 +49,11 @@ void init_random_generator(void);
  */
 uint32_t generate_serial_number(uint32_t index);
 
+/**
+ * @brief Створює неіменований канал pipe для передачі виробів першому робітнику.
+ * @param pipe_fd Масив із двох дескрипторів: [0] для читання, [1] для запису.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_PIPE при помилці.
+ */
+ZavodErrorCode create_pipe(int pipe_fd[2]);
+
 #endif /* PARENT_H */

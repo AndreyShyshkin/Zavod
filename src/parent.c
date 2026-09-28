@@ -191,3 +191,26 @@ uint32_t generate_serial_number(uint32_t index) {
     uint32_t random_part = (uint32_t)(rand() % 900 + 100);
     return (index * 1000U) + random_part;
 }
+
+/**
+ * @brief Створює неіменований канал pipe для передачі виробів першому робітнику.
+ * @param pipe_fd Масив із двох дескрипторів: [0] для читання, [1] для запису.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_PIPE або ZAVOD_ERR_INVALID_ARG при помилці.
+ */
+ZavodErrorCode create_pipe(int pipe_fd[2]) {
+    if (pipe_fd == NULL) {
+        fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Вказівник pipe_fd є NULL.\n");
+        return ZAVOD_ERR_INVALID_ARG;
+    }
+
+    if (pipe(pipe_fd) == -1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Не вдалося створити неіменований канал pipe");
+        return ZAVOD_ERR_PIPE;
+    }
+
+    printf("[КЕРІВНИК] Створено неіменований канал pipe (read fd: %d, write fd: %d).\n",
+           pipe_fd[0], pipe_fd[1]);
+    fflush(stdout);
+
+    return ZAVOD_SUCCESS;
+}
