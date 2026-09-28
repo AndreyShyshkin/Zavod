@@ -36,6 +36,7 @@ IMAGE_NAME = zavod-build-env
 
 # Спільні об'єктні файли
 COMMON_OBJS = $(OBJ_DIR)/semaphore_utils.o
+PARENT_OBJS = $(COMMON_OBJS) $(OBJ_DIR)/parent.o
 
 # Основна ціль за замовчуванням
 all: $(OBJ_DIR) $(TARGET)
@@ -48,11 +49,14 @@ $(OBJ_DIR):
 $(OBJ_DIR)/semaphore_utils.o: $(SRC_DIR)/semaphore_utils.c $(INC_DIR)/semaphore_utils.h $(INC_DIR)/common.h | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/main.o: $(SRC_DIR)/main.c $(INC_DIR)/common.h | $(OBJ_DIR)
+$(OBJ_DIR)/parent.o: $(SRC_DIR)/parent.c $(INC_DIR)/parent.h $(INC_DIR)/common.h | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/main.o: $(SRC_DIR)/main.c $(INC_DIR)/common.h $(INC_DIR)/parent.h | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Збирання головної програми фабрики
-$(TARGET): $(OBJ_DIR)/main.o $(COMMON_OBJS)
+$(TARGET): $(OBJ_DIR)/main.o $(PARENT_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Збирання проєкту з увімкненим AddressSanitizer для пошуку переповнень і витоків
