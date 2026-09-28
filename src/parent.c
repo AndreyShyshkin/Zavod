@@ -20,6 +20,7 @@
 
 #include "parent.h"
 #include "common.h"
+#include "semaphore_utils.h"
 
 /* Глобальні атомарні прапорці готовності робітників (змінюються в обробнику сигналів) */
 static volatile sig_atomic_t g_worker1_ready = 0;
@@ -576,4 +577,29 @@ ZavodErrorCode wait_and_print_summary(pid_t pid1, pid_t pid2, int total_count, i
     fflush(stdout);
 
     return ZAVOD_SUCCESS;
+}
+
+/**
+ * @brief Видаляє чергу повідомлень та очищує IPC-ресурси керівника.
+ * @param msqid Дескриптор черги повідомлень System V для видалення.
+ */
+void cleanup_ipc_resources(int msqid) {
+    printf("[КЕРІВНИК] Очищення системних IPC-ресурсів...\n");
+    fflush(stdout);
+
+    /* 1. Видалення черги повідомлень System V через msgctl(IPC_RMID) */
+    if (msqid >= 0) {
+        if (msgctl(msqid, IPC_RMID, NULL) == -1) {
+            perror("[КЕРІВНИК - ПОМИЛКА] Помилка видалення черги повідомлень msgctl(IPC_RMID)");
+        } else {
+            printf("[КЕРІВНИК] Чергу повідомлень (msqid: %d) успішно видалено з ядра.\n", msqid);
+            fflush(stdout);
+        }
+    }
+
+    /* 2. Закриття та відв'язування семафора кімнати відпочинку */
+    cleanup_break_semaphore();
+
+    printf("[КЕРІВНИК] Усі системні IPC-ресурси успішно прибрано.\n");
+    fflush(stdout);
 }

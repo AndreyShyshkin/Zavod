@@ -100,4 +100,10 @@ ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, i
  */
 ZavodErrorCode wait_and_print_summary(pid_t pid1, pid_t pid2, int total_count, int passed_count);
 
+/**
+ * @brief Видаляє чергу повідомлень та очищує IPC-ресурси керівника.
+ * @param msqid Дескриптор черги повідомлень System V для видалення.
+ */
+void cleanup_ipc_resources(int msqid);
+
 #endif /* PARENT_H */
