@@ -31,4 +31,10 @@ ZavodErrorCode parse_arguments(int argc, char *argv[], int *out_count);
  */
 ZavodErrorCode setup_signal_handlers(void);
 
+/**
+ * @brief Очікує надходження сигналів готовності від обох робітників.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_SIGNAL при помилці.
+ */
+ZavodErrorCode wait_for_workers_ready(void);
+
 #endif /* PARENT_H */

@@ -76,6 +76,54 @@ ZavodErrorCode setup_signal_handlers(void) {
 }
 
 /**
+ * @brief Очікує надходження сигналів готовності від обох робітників.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_SIGNAL при помилці.
+ */
+ZavodErrorCode wait_for_workers_ready(void) {
+    if (!g_sigmask_saved) {
+        fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Обробники сигналів не були ініціалізовані.\n");
+        return ZAVOD_ERR_SIGNAL;
+    }
+
+    printf("[КЕРІВНИК] Очікування сигналів готовності від робітників (SIGUSR1, SIGUSR2)...\n");
+    fflush(stdout);
+
+    bool worker1_logged = false;
+    bool worker2_logged = false;
+
+    while (!g_worker1_ready || !g_worker2_ready) {
+        /*
+         * sigsuspend тимчасово замінює маску сигналів на g_orig_sigmask
+         * та блокує процес до отримання будь-якого розблокованого сигналу.
+         */
+        sigsuspend(&g_orig_sigmask);
+
+        if (g_worker1_ready && !worker1_logged) {
+            printf("[КЕРІВНИК] Робітник 1 готовий (отримано сигнал готовності SIGUSR1).\n");
+            fflush(stdout);
+            worker1_logged = true;
+        }
+
+        if (g_worker2_ready && !worker2_logged) {
+            printf("[КЕРІВНИК] Робітник 2 готовий (отримано сигнал готовності SIGUSR2).\n");
+            fflush(stdout);
+            worker2_logged = true;
+        }
+    }
+
+    printf("[КЕРІВНИК] Обидва робітники підтвердили готовність до роботи.\n");
+    fflush(stdout);
+
+    /* Відновлюємо стандартну маску сигналів процесу */
+    if (sigprocmask(SIG_SETMASK, &g_orig_sigmask, NULL) == -1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка відновлення маски сигналів");
+        return ZAVOD_ERR_SIGNAL;
+    }
+
+    return ZAVOD_SUCCESS;
+}
+
+/**
  * @brief Перевіряє та зчитує кількість виробів із аргументів командного рядка.
  * @param argc Кількість аргументів програми.
  * @param argv Масив аргументів командного рядка.
