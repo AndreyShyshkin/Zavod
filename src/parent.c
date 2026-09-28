@@ -16,6 +16,7 @@
 #include <signal.h>
 #include <sys/ipc.h>
 #include <sys/msg.h>
+#include <sys/wait.h>
 
 #include "parent.h"
 #include "common.h"
@@ -292,4 +293,103 @@ int init_message_queue(void) {
     fflush(stdout);
 
     return msqid;
+}
+
+/**
+ * @brief Породжує два дочірні процеси (Робітник 1 та Робітник 2) через fork та налаштовує pipe.
+ * @param pipe_fd Масив дескрипторів неіменованого каналу.
+ * @param out_pid1 Вказівник для збереження PID першого дочірнього процесу.
+ * @param out_pid2 Вказівник для збереження PID другого дочірнього процесу.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_FORK при помилці.
+ */
+ZavodErrorCode launch_workers(int pipe_fd[2], pid_t *out_pid1, pid_t *out_pid2) {
+    if (pipe_fd == NULL || out_pid1 == NULL || out_pid2 == NULL) {
+        fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Некоректні аргументи у launch_workers.\n");
+        return ZAVOD_ERR_INVALID_ARG;
+    }
+
+    /* 1. Запуск дочірнього процесу №1: Робітник 1 (Перевіряючий, Issue #2) */
+    pid_t pid1 = fork();
+    if (pid1 < 0) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка виклику fork для Робітника 1");
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
+        return ZAVOD_ERR_FORK;
+    }
+
+    if (pid1 == 0) {
+        /* Дочірній процес №1 */
+        close(pipe_fd[1]); /* Закриваємо невикористовуваний кінець запису */
+
+        /* Перенаправляємо дескриптор читання pipe на STDIN_FILENO для зручності */
+        if (dup2(pipe_fd[0], STDIN_FILENO) == -1) {
+            perror("[РОБІТНИК 1 - ПОМИЛКА] Помилка дублювання дескриптора dup2");
+            close(pipe_fd[0]);
+            exit(EXIT_FAILURE);
+        }
+
+        char fd_str[16];
+        snprintf(fd_str, sizeof(fd_str), "%d", pipe_fd[0]);
+
+        /* Відновлюємо маску сигналів перед викликом exec */
+        sigset_t empty_mask;
+        sigemptyset(&empty_mask);
+        sigprocmask(SIG_SETMASK, &empty_mask, NULL);
+
+        /* Запуск виконуваного файлу робітника 1 */
+        execl("./worker1", "worker1", fd_str, NULL);
+
+        /* Якщо execl повернувся — сталася помилка (наприклад, бінарник ще не зібрано) */
+        perror("[РОБІТНИК 1 - ПОМИЛКА] Не вдалося виконати ./worker1 (execl)");
+        close(pipe_fd[0]);
+        exit(EXIT_FAILURE);
+    }
+
+    *out_pid1 = pid1;
+    printf("[КЕРІВНИК] Запущено процес Робітника 1 (Перевіряючий, PID: %d).\n", pid1);
+    fflush(stdout);
+
+    /* 2. Запуск дочірнього процесу №2: Робітник 2 (Тестувальник, Issue #3) */
+    pid_t pid2 = fork();
+    if (pid2 < 0) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка виклику fork для Робітника 2");
+        /* Запобігаємо появі процесу-зомбі */
+        kill(pid1, SIGTERM);
+        waitpid(pid1, NULL, 0);
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
+        return ZAVOD_ERR_FORK;
+    }
+
+    if (pid2 == 0) {
+        /* Дочірній процес №2: йому не потрібен unnamed pipe керівника */
+        close(pipe_fd[0]);
+        close(pipe_fd[1]);
+
+        /* Відновлюємо маску сигналів перед викликом exec */
+        sigset_t empty_mask;
+        sigemptyset(&empty_mask);
+        sigprocmask(SIG_SETMASK, &empty_mask, NULL);
+
+        /* Запуск виконуваного файлу робітника 2 */
+        execl("./worker2", "worker2", NULL);
+
+        /* Якщо execl повернувся — сталася помилка */
+        perror("[РОБІТНИК 2 - ПОМИЛКА] Не вдалося виконати ./worker2 (execl)");
+        exit(EXIT_FAILURE);
+    }
+
+    *out_pid2 = pid2;
+    printf("[КЕРІВНИК] Запущено процес Робітника 2 (Тестувальник, PID: %d).\n", pid2);
+    fflush(stdout);
+
+    /*
+     * Батьківський процес закриває кінець читання pipe_fd[0],
+     * оскільки він лише записуватиме у pipe_fd[1].
+     */
+    if (close(pipe_fd[0]) == -1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка закриття pipe_fd[0] у батька");
+    }
+
+    return ZAVOD_SUCCESS;
 }

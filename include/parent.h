@@ -70,4 +70,13 @@ ZavodErrorCode send_items_via_pipe(int write_fd, int count);
  */
 int init_message_queue(void);
 
+/**
+ * @brief Породжує два дочірні процеси (Робітник 1 та Робітник 2) через fork та налаштовує pipe.
+ * @param pipe_fd Масив дескрипторів неіменованого каналу.
+ * @param out_pid1 Вказівник для збереження PID першого дочірнього процесу.
+ * @param out_pid2 Вказівник для збереження PID другого дочірнього процесу.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_FORK при помилці.
+ */
+ZavodErrorCode launch_workers(int pipe_fd[2], pid_t *out_pid1, pid_t *out_pid2);
+
 #endif /* PARENT_H */
