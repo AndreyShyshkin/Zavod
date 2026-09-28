@@ -214,3 +214,50 @@ ZavodErrorCode create_pipe(int pipe_fd[2]) {
 
     return ZAVOD_SUCCESS;
 }
+
+/**
+ * @brief Генерує та записує N деталей у неіменований канал, після чого закриває його для передачі EOF.
+ * @param write_fd Дескриптор неіменованого каналу для запису.
+ * @param count Кількість деталей (N) для передачі.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_PIPE або ZAVOD_ERR_INVALID_ARG при помилці.
+ */
+ZavodErrorCode send_items_via_pipe(int write_fd, int count) {
+    if (write_fd < 0 || count <= 0) {
+        fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Некоректні параметри для send_items_via_pipe (fd: %d, count: %d).\n",
+                write_fd, count);
+        return ZAVOD_ERR_INVALID_ARG;
+    }
+
+    printf("[КЕРІВНИК] Початок генерації та передачі %d деталей у pipe...\n", count);
+    fflush(stdout);
+
+    for (int i = 1; i <= count; i++) {
+        PipeItem item;
+        item.id = (uint32_t)i;
+        item.serial_number = generate_serial_number((uint32_t)i);
+
+        ssize_t bytes_written = write(write_fd, &item, sizeof(PipeItem));
+        if (bytes_written != (ssize_t)sizeof(PipeItem)) {
+            perror("[КЕРІВНИК - ПОМИЛКА] Помилка запису елемента в unnamed pipe");
+            close(write_fd);
+            return ZAVOD_ERR_PIPE;
+        }
+
+        if (count <= 20 || i % (count / 10 == 0 ? 1 : count / 10) == 0 || i == count) {
+            printf("[КЕРІВНИК] Записано в pipe: деталь #%u (серійний номер %u)\n",
+                   item.id, item.serial_number);
+            fflush(stdout);
+        }
+    }
+
+    /* Закриваємо дескриптор запису, сигналізуючи EOF для робітника 1 */
+    if (close(write_fd) == -1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка закриття write_fd у pipe");
+        return ZAVOD_ERR_PIPE;
+    }
+
+    printf("[КЕРІВНИК] Усі %d деталей успішно відправлено. Кінчик pipe закрито (надіслано EOF).\n", count);
+    fflush(stdout);
+
+    return ZAVOD_SUCCESS;
+}

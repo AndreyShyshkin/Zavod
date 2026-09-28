@@ -56,4 +56,12 @@ uint32_t generate_serial_number(uint32_t index);
  */
 ZavodErrorCode create_pipe(int pipe_fd[2]);
 
+/**
+ * @brief Генерує та записує N деталей у неіменований канал, після чого закриває його для передачі EOF.
+ * @param write_fd Дескриптор неіменованого каналу для запису.
+ * @param count Кількість деталей (N) для передачі.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_PIPE або ZAVOD_ERR_INVALID_ARG при помилці.
+ */
+ZavodErrorCode send_items_via_pipe(int write_fd, int count);
+
 #endif /* PARENT_H */
