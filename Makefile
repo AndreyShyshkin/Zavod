@@ -6,7 +6,12 @@
 # Компілятор та прапорці компіляції (стандарт C11, суворі попередження)
 CC = gcc
 CFLAGS = -Wall -Wextra -pedantic -std=c11 -D_POSIX_C_SOURCE=200809L -Iinclude
-LDFLAGS = -lrt -pthread
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Linux)
+    LDFLAGS = -lrt -pthread
+else
+    LDFLAGS = -pthread
+endif
 
 # Прапорці санітайзерів для динамічного аналізу пам'яті (AddressSanitizer та UBSan)
 ASAN_FLAGS = -fsanitize=address -fsanitize=undefined -fno-omit-frame-pointer -g
@@ -17,6 +22,7 @@ PARENT_BIN = parent
 WORKER1_BIN = worker1
 WORKER2_BIN = worker2
 TEST_BIN = test_semaphores
+TEST_PARENT_BIN = test_parent
 
 STRESS_BIN = test_break_stress
 
@@ -31,6 +37,7 @@ IMAGE_NAME = zavod-build-env
 
 # Спільні об'єктні файли
 COMMON_OBJS = $(OBJ_DIR)/semaphore_utils.o
+PARENT_OBJS = $(COMMON_OBJS) $(OBJ_DIR)/parent.o
 
 # Основна ціль за замовчуванням
 all: $(OBJ_DIR) $(TARGET)
@@ -43,17 +50,20 @@ $(OBJ_DIR):
 $(OBJ_DIR)/semaphore_utils.o: $(SRC_DIR)/semaphore_utils.c $(INC_DIR)/semaphore_utils.h $(INC_DIR)/common.h | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(OBJ_DIR)/main.o: $(SRC_DIR)/main.c $(INC_DIR)/common.h | $(OBJ_DIR)
+$(OBJ_DIR)/parent.o: $(SRC_DIR)/parent.c $(INC_DIR)/parent.h $(INC_DIR)/common.h | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(OBJ_DIR)/main.o: $(SRC_DIR)/main.c $(INC_DIR)/common.h $(INC_DIR)/parent.h | $(OBJ_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 # Збирання головної програми фабрики
-$(TARGET): $(OBJ_DIR)/main.o $(COMMON_OBJS)
+$(TARGET): $(OBJ_DIR)/main.o $(PARENT_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Збирання проєкту з увімкненим AddressSanitizer для пошуку переповнень і витоків
 asan: CFLAGS += $(ASAN_FLAGS)
 asan: LDFLAGS += $(ASAN_FLAGS)
-asan: clean $(OBJ_DIR) $(TARGET) $(TEST_BIN) $(STRESS_BIN)
+asan: clean $(OBJ_DIR) $(TARGET) $(TEST_PARENT_BIN) $(TEST_BIN) $(STRESS_BIN)
 	@echo "Збирання з AddressSanitizer успішно завершено."
 
 # Ціль для батьківського процесу (керівник)
@@ -77,6 +87,10 @@ worker2: $(COMMON_OBJS)
 		echo "Файл $(SRC_DIR)/worker2.c очікується від колеги (Issue #3)."; \
 	fi
 
+# Ціль для збирання тестів керівника (Issue #1)
+$(TEST_PARENT_BIN): $(TEST_DIR)/test_parent.c $(PARENT_OBJS)
+	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
+
 # Ціль для збирання базового тестового стенду семафорів
 $(TEST_BIN): $(TEST_DIR)/test_semaphores.c $(COMMON_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
@@ -86,10 +100,12 @@ $(STRESS_BIN): $(TEST_DIR)/test_break_stress.c $(COMMON_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Автоматичний запуск усіх інтеграційних та стрес-тестів
-test: $(TEST_BIN) $(STRESS_BIN)
-	@echo "\n>>> Запуск базового тесту семафорів..."
+test: $(TEST_PARENT_BIN) $(TEST_BIN) $(STRESS_BIN)
+	@echo "\n>>> Запуск тестів оркестрації керівника (Issue #1)..."
+	./$(TEST_PARENT_BIN)
+	@echo "\n>>> Запуск базового тесту семафорів (Issue #4)..."
 	./$(TEST_BIN)
-	@echo "\n>>> Запуск стрес-тесту конкурентності..."
+	@echo "\n>>> Запуск стрес-тесту конкурентності (Issue #4)..."
 	./$(STRESS_BIN)
 	@echo "\n>>> Усі тести пройдено успішно!"
 
@@ -112,7 +128,7 @@ clean-ipc:
 # Повне очищення бінарних файлів, об'єктних модулів, логів та всіх IPC-ресурсів
 clean: clean-ipc
 	@echo "Видалення скомпільованих бінарних файлів, тестів та логів..."
-	rm -rf $(TARGET) $(PARENT_BIN) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_BIN) $(STRESS_BIN) $(OBJ_DIR)
+	rm -rf $(TARGET) $(PARENT_BIN) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_PARENT_BIN) $(TEST_BIN) $(STRESS_BIN) $(OBJ_DIR)
 	rm -f breaks.log break_log.txt
 	@echo "Повне очищення середовища завершено успішно."
 
