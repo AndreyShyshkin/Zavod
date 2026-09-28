@@ -603,3 +603,100 @@ void cleanup_ipc_resources(int msqid) {
     printf("[КЕРІВНИК] Усі системні IPC-ресурси успішно прибрано.\n");
     fflush(stdout);
 }
+
+/**
+ * @brief Головний керуючий цикл оркестрації керівника заводу.
+ * @param argc Кількість аргументів програми.
+ * @param argv Масив аргументів командного рядка.
+ * @return EXIT_SUCCESS або EXIT_FAILURE.
+ */
+int run_supervisor(int argc, char *argv[]) {
+    printf("=================================================================\n");
+    printf("     КЕРІВНИК ЗМІНИ ЗАВОДУ (SUPERVISOR PROCESS, ISSUE #1)        \n");
+    printf("=================================================================\n");
+    fflush(stdout);
+
+    /* 1. Зчитування та валідація аргументів командного рядка */
+    int count = 0;
+    if (parse_arguments(argc, argv, &count) != ZAVOD_SUCCESS) {
+        return EXIT_FAILURE;
+    }
+
+    printf("[КЕРІВНИК] Заплановано випуск та перевірку деталей: %d шт.\n", count);
+    fflush(stdout);
+
+    /* 2. Ініціалізація семафора перерв (Issue #4) */
+    if (init_break_semaphore() != ZAVOD_SUCCESS) {
+        fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Не вдалося ініціалізувати семафор перерв.\n");
+        return EXIT_FAILURE;
+    }
+
+    /* 3. Ініціалізація черги повідомлень (Issue #1 & #3) */
+    int msqid = init_message_queue();
+    if (msqid < 0) {
+        cleanup_break_semaphore();
+        return EXIT_FAILURE;
+    }
+
+    /* 4. Налаштування обробників сигналів та блокування перед fork */
+    if (setup_signal_handlers() != ZAVOD_SUCCESS) {
+        cleanup_ipc_resources(msqid);
+        return EXIT_FAILURE;
+    }
+
+    /* 5. Створення неіменованого каналу pipe */
+    int pipe_fd[2];
+    if (create_pipe(pipe_fd) != ZAVOD_SUCCESS) {
+        cleanup_ipc_resources(msqid);
+        return EXIT_FAILURE;
+    }
+
+    /* 6. Породження дочірніх процесів через fork() */
+    pid_t pid1 = 0, pid2 = 0;
+    if (launch_workers(pipe_fd, &pid1, &pid2) != ZAVOD_SUCCESS) {
+        cleanup_ipc_resources(msqid);
+        return EXIT_FAILURE;
+    }
+
+    /* 7. Очікування сигналів готовності від обох робітників */
+    if (wait_for_workers_ready() != ZAVOD_SUCCESS) {
+        fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Збій під час синхронізації готовності.\n");
+        kill(pid1, SIGTERM);
+        kill(pid2, SIGTERM);
+        waitpid(pid1, NULL, 0);
+        waitpid(pid2, NULL, 0);
+        close(pipe_fd[1]);
+        cleanup_ipc_resources(msqid);
+        return EXIT_FAILURE;
+    }
+
+    /* 8. Генерація та відправка серійних номерів у pipe (і закриття на EOF) */
+    if (send_items_via_pipe(pipe_fd[1], count) != ZAVOD_SUCCESS) {
+        fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Збій під час запису номерів у pipe.\n");
+        kill(pid1, SIGTERM);
+        kill(pid2, SIGTERM);
+        waitpid(pid1, NULL, 0);
+        waitpid(pid2, NULL, 0);
+        cleanup_ipc_resources(msqid);
+        return EXIT_FAILURE;
+    }
+
+    /* 9. Зчитування фінальних результатів із черги повідомлень */
+    int passed_count = 0;
+    int defect_count = 0;
+    if (read_results_from_queue(msqid, pid2, count, &passed_count, &defect_count) != ZAVOD_SUCCESS) {
+        fprintf(stderr, "[КЕРІВНИК - УВАГА] Зчитування черги повідомлень завершилося з попередженням.\n");
+    }
+
+    /* 10. Очікування завершення дочірніх процесів та підсумок */
+    wait_and_print_summary(pid1, pid2, count, passed_count);
+
+    /* 11. Фінальне очищення системних ресурсів */
+    cleanup_ipc_resources(msqid);
+
+    printf("[КЕРІВНИК] Роботу зміни успішно завершено. Усі ресурси звільнено.\n");
+    printf("=================================================================\n");
+    fflush(stdout);
+
+    return EXIT_SUCCESS;
+}

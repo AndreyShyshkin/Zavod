@@ -106,4 +106,12 @@ ZavodErrorCode wait_and_print_summary(pid_t pid1, pid_t pid2, int total_count, i
  */
 void cleanup_ipc_resources(int msqid);
 
+/**
+ * @brief Головний керуючий цикл оркестрації керівника заводу.
+ * @param argc Кількість аргументів програми.
+ * @param argv Масив аргументів командного рядка.
+ * @return EXIT_SUCCESS або EXIT_FAILURE.
+ */
+int run_supervisor(int argc, char *argv[]);
+
 #endif /* PARENT_H */
