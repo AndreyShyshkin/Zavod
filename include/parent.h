@@ -64,4 +64,10 @@ ZavodErrorCode create_pipe(int pipe_fd[2]);
  */
 ZavodErrorCode send_items_via_pipe(int write_fd, int count);
 
+/**
+ * @brief Створює або підключається до черги повідомлень System V через ftok.
+ * @return Дескриптор черги (msqid >= 0) у разі успіху або -1 при помилці.
+ */
+int init_message_queue(void);
+
 #endif /* PARENT_H */

@@ -14,6 +14,8 @@
 #include <limits.h>
 
 #include <signal.h>
+#include <sys/ipc.h>
+#include <sys/msg.h>
 
 #include "parent.h"
 #include "common.h"
@@ -260,4 +262,34 @@ ZavodErrorCode send_items_via_pipe(int write_fd, int count) {
     fflush(stdout);
 
     return ZAVOD_SUCCESS;
+}
+
+/**
+ * @brief Створює або підключається до черги повідомлень System V через ftok.
+ * @return Дескриптор черги (msqid >= 0) у разі успіху або -1 при помилці.
+ */
+int init_message_queue(void) {
+    key_t key = ftok(FTOK_PATH, FTOK_PROJ_ID_MSG);
+    if (key == (key_t)-1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка генерації ключа ftok для черги повідомлень");
+        return -1;
+    }
+
+    int msqid = msgget(key, IPC_CREAT | 0666);
+    if (msqid == -1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка виклику msgget для створення черги повідомлень");
+        return -1;
+    }
+
+    /* Очищуємо залишкові повідомлення від попередніх запусків (drain queue) */
+    struct msg_buffer dummy;
+    while (msgrcv(msqid, &dummy, sizeof(struct msg_buffer) - sizeof(long), 0, IPC_NOWAIT) > 0) {
+        /* Дренування старих повідомлень */
+    }
+
+    printf("[КЕРІВНИК] Черга повідомлень IPC підготовлена (msqid: %d, key: 0x%08x).\n",
+           msqid, (unsigned int)key);
+    fflush(stdout);
+
+    return msqid;
 }
