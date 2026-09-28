@@ -500,3 +500,80 @@ ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, i
 
     return ZAVOD_SUCCESS;
 }
+
+/**
+ * @brief Очікує завершення обох дочірніх процесів та виводить фінальну статистику зміни.
+ * @param pid1 PID процесу Робітника 1.
+ * @param pid2 PID процесу Робітника 2.
+ * @param total_count Загальна кількість виробів (N).
+ * @param passed_count Кількість виробів, що успішно пройшли повний контроль.
+ * @return ZAVOD_SUCCESS у разі успіху.
+ */
+ZavodErrorCode wait_and_print_summary(pid_t pid1, pid_t pid2, int total_count, int passed_count) {
+    int status1 = 0, status2 = 0;
+    char worker1_status_str[64] = "Завершено успішно";
+    char worker2_status_str[64] = "Завершено успішно";
+
+    printf("\n[КЕРІВНИК] Очікування завершення роботи дочірніх процесів (waitpid)...\n");
+    fflush(stdout);
+
+    /* Очікування завершення Робітника 1 */
+    if (pid1 > 0) {
+        if (waitpid(pid1, &status1, 0) == -1) {
+            perror("[КЕРІВНИК - ПОМИЛКА] Помилка waitpid для Робітника 1");
+            snprintf(worker1_status_str, sizeof(worker1_status_str), "Помилка очікування");
+        } else {
+            if (WIFEXITED(status1)) {
+                int exit_code = WEXITSTATUS(status1);
+                printf("[КЕРІВНИК] Робітник 1 (PID %d) завершив роботу з кодом виходу: %d.\n",
+                       pid1, exit_code);
+                snprintf(worker1_status_str, sizeof(worker1_status_str), "Код виходу %d", exit_code);
+            } else if (WIFSIGNALED(status1)) {
+                int term_sig = WTERMSIG(status1);
+                printf("[КЕРІВНИК] Робітник 1 (PID %d) завершився через сигнал: %d.\n",
+                       pid1, term_sig);
+                snprintf(worker1_status_str, sizeof(worker1_status_str), "Сигнал %d", term_sig);
+            }
+        }
+    }
+
+    /* Очікування завершення Робітника 2 */
+    if (pid2 > 0) {
+        if (waitpid(pid2, &status2, 0) == -1) {
+            perror("[КЕРІВНИК - ПОМИЛКА] Помилка waitpid для Робітника 2");
+            snprintf(worker2_status_str, sizeof(worker2_status_str), "Помилка очікування");
+        } else {
+            if (WIFEXITED(status2)) {
+                int exit_code = WEXITSTATUS(status2);
+                printf("[КЕРІВНИК] Робітник 2 (PID %d) завершив роботу з кодом виходу: %d.\n",
+                       pid2, exit_code);
+                snprintf(worker2_status_str, sizeof(worker2_status_str), "Код виходу %d", exit_code);
+            } else if (WIFSIGNALED(status2)) {
+                int term_sig = WTERMSIG(status2);
+                printf("[КЕРІВНИК] Робітник 2 (PID %d) завершився через сигнал: %d.\n",
+                       pid2, term_sig);
+                snprintf(worker2_status_str, sizeof(worker2_status_str), "Сигнал %d", term_sig);
+            }
+        }
+    }
+
+    int defect_count = total_count - passed_count;
+    if (defect_count < 0) {
+        defect_count = 0;
+    }
+    double passed_pct = (total_count > 0) ? ((double)passed_count * 100.0 / total_count) : 0.0;
+    double defect_pct = (total_count > 0) ? ((double)defect_count * 100.0 / total_count) : 0.0;
+
+    printf("\n=================================================================\n");
+    printf("                  ПІДСУМКОВА СТАТИСТИКА ЗМІНИ                     \n");
+    printf("=================================================================\n");
+    printf(" Загальна кількість деталей (план N):    %d\n", total_count);
+    printf(" Успішно пройшли повний контроль якості: %d (%.1f%%)\n", passed_count, passed_pct);
+    printf(" Відсіяно як брак (дефектні вироби):     %d (%.1f%%)\n", defect_count, defect_pct);
+    printf(" Стан процесу Робітника 1 (PID %d):      %s\n", pid1, worker1_status_str);
+    printf(" Стан процесу Робітника 2 (PID %d):      %s\n", pid2, worker2_status_str);
+    printf("=================================================================\n\n");
+    fflush(stdout);
+
+    return ZAVOD_SUCCESS;
+}

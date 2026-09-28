@@ -90,4 +90,14 @@ ZavodErrorCode launch_workers(int pipe_fd[2], pid_t *out_pid1, pid_t *out_pid2);
  */
 ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, int *out_passed, int *out_defects);
 
+/**
+ * @brief Очікує завершення обох дочірніх процесів та виводить фінальну статистику зміни.
+ * @param pid1 PID процесу Робітника 1.
+ * @param pid2 PID процесу Робітника 2.
+ * @param total_count Загальна кількість виробів (N).
+ * @param passed_count Кількість виробів, що успішно пройшли повний контроль.
+ * @return ZAVOD_SUCCESS у разі успіху.
+ */
+ZavodErrorCode wait_and_print_summary(pid_t pid1, pid_t pid2, int total_count, int passed_count);
+
 #endif /* PARENT_H */
