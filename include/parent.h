@@ -25,4 +25,10 @@
  */
 ZavodErrorCode parse_arguments(int argc, char *argv[], int *out_count);
 
+/**
+ * @brief Налаштовує обробники сигналів готовності робітників та блокування перед fork.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_SIGNAL при помилці.
+ */
+ZavodErrorCode setup_signal_handlers(void);
+
 #endif /* PARENT_H */

@@ -13,8 +13,67 @@
 #include <errno.h>
 #include <limits.h>
 
+#include <signal.h>
+
 #include "parent.h"
 #include "common.h"
+
+/* Глобальні атомарні прапорці готовності робітників (змінюються в обробнику сигналів) */
+static volatile sig_atomic_t g_worker1_ready = 0;
+static volatile sig_atomic_t g_worker2_ready = 0;
+static sigset_t g_orig_sigmask;
+static bool g_sigmask_saved = false;
+
+/**
+ * @brief Обробник сигналів готовності SIG_WORKER1_READY та SIG_WORKER2_READY.
+ * @param sig Номер отриманого сигналу.
+ */
+static void handle_worker_ready_signal(int sig) {
+    if (sig == SIG_WORKER1_READY) {
+        g_worker1_ready = 1;
+    } else if (sig == SIG_WORKER2_READY) {
+        g_worker2_ready = 1;
+    }
+}
+
+/**
+ * @brief Налаштовує обробники сигналів готовності робітників та блокування перед fork.
+ * @return ZAVOD_SUCCESS у разі успіху, ZAVOD_ERR_SIGNAL при помилці.
+ */
+ZavodErrorCode setup_signal_handlers(void) {
+    g_worker1_ready = 0;
+    g_worker2_ready = 0;
+
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_worker_ready_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+
+    if (sigaction(SIG_WORKER1_READY, &sa, NULL) == -1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Не вдалося налаштувати обробник SIGUSR1");
+        return ZAVOD_ERR_SIGNAL;
+    }
+
+    if (sigaction(SIG_WORKER2_READY, &sa, NULL) == -1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Не вдалося налаштувати обробник SIGUSR2");
+        return ZAVOD_ERR_SIGNAL;
+    }
+
+    /* Блокуємо сигнали перед fork, щоб жоден сигнал не загубився до очікування */
+    sigset_t block_mask;
+    sigemptyset(&block_mask);
+    sigaddset(&block_mask, SIG_WORKER1_READY);
+    sigaddset(&block_mask, SIG_WORKER2_READY);
+
+    if (sigprocmask(SIG_BLOCK, &block_mask, &g_orig_sigmask) == -1) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка блокування сигналів у sigprocmask");
+        return ZAVOD_ERR_SIGNAL;
+    }
+    g_sigmask_saved = true;
+
+    return ZAVOD_SUCCESS;
+}
 
 /**
  * @brief Перевіряє та зчитує кількість виробів із аргументів командного рядка.
