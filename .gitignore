@@ -1,7 +1,15 @@
 factory
+parent
+worker1
+worker2
+test_semaphores
+test_parent
+test_break_stress
+obj/
 *.o
 breaks.log
+break_log.txt
 /tmp/factory_qc_fifo
+/tmp/zavod_fifo
 .DS_Store
 .idea/
-EOF
