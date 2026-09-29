@@ -103,7 +103,7 @@ test: $(TARGET) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_PARENT_BIN) $(TEST_BIN) $(S
 	@echo "\n>>> Запуск наскрізного тесту лінії виробництва (10 деталей)..."
 	./$(TARGET) 10
 	@echo "\n>>> Валідація журналу перерв..."
-	./scripts/verify_logs.sh break_log.txt
+	bash ./scripts/verify_logs.sh break_log.txt
 	@echo "\n>>> Усі тести та наскрізна перевірка пройдені успішно!"
 
 # Синонім для test
