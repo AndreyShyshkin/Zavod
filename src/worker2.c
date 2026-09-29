@@ -88,6 +88,13 @@ int main(void) {
     printf("[РОБІТНИК 2] Очікування підключення до FIFO (%s)...\n", FIFO_PATH);
     fflush(stdout);
 
+    /* Забезпечуємо існування FIFO перед відкриттям, щоб уникнути ENOENT */
+    if (mkfifo(FIFO_PATH, 0666) == -1 && errno != EEXIST) {
+        perror("[РОБІТНИК 2 - ПОМИЛКА] Помилка створення FIFO mkfifo()");
+        cleanup_break_semaphore();
+        return EXIT_FAILURE;
+    }
+
     int fifo_fd = open(FIFO_PATH, O_RDONLY);
     if (fifo_fd == -1) {
         perror("[РОБІТНИК 2 - ПОМИЛКА] Не вдалося відкрити FIFO на читання");
@@ -124,13 +131,12 @@ int main(void) {
                    item.serial_number);
             fflush(stdout);
         } else {
-            /* Стандартні деталі: проводимо тестування (бал 1–10) */
+            /* Стандартні деталі: проводимо фінальне тестування (бал якості 1–10 згідно з завданням) */
             int score_10 = (rand() % 10) + 1;
-            /* Батьківський процес очікує шкалу 0..100 з порогом 50 */
-            uint8_t final_metric_score = (uint8_t)(score_10 * 10);
+            uint8_t final_metric_score = (uint8_t)score_10;
 
-            printf("[РОБІТНИК 2] Фінальний тест деталі №%u виконано. Оцінка: %d/10 (балів: %u/100).\n",
-                   item.serial_number, score_10, final_metric_score);
+            printf("[РОБІТНИК 2] Фінальний тест деталі №%u виконано. Бал якості: %d/10.\n",
+                   item.serial_number, score_10);
             fflush(stdout);
 
             /* Формування та відправка повідомлення в чергу System V */
@@ -139,7 +145,7 @@ int main(void) {
             msg.msg_type = MSG_TYPE_METRIC;
             msg.metric.serial_number = item.serial_number;
             msg.metric.quality_score = final_metric_score;
-            snprintf(msg.msg_text, sizeof(msg.msg_text), "Оцінка якості: %d/10", score_10);
+            snprintf(msg.msg_text, sizeof(msg.msg_text), "Бал якості: %d/10", score_10);
 
             /* Блокуюча відправка повідомлення */
             while (msgsnd(msqid, &msg, payload_size, 0) == -1) {

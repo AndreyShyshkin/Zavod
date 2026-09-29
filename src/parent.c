@@ -28,6 +28,10 @@ static volatile sig_atomic_t g_worker2_ready = 0;
 static sigset_t g_orig_sigmask;
 static bool g_sigmask_saved = false;
 
+/* Збережений стан завершення Робітника 2 при неблокуючому опитуванні */
+static int g_pid2_reaped = 0;
+static int g_pid2_saved_status = 0;
+
 /**
  * @brief Обробник сигналів готовності SIG_WORKER1_READY та SIG_WORKER2_READY.
  * @param sig Номер отриманого сигналу.
@@ -328,9 +332,9 @@ ZavodErrorCode launch_workers(int pipe_fd[2], pid_t *out_pid1, pid_t *out_pid2) 
             close(pipe_fd[0]);
             exit(EXIT_FAILURE);
         }
-
-        char fd_str[16];
-        snprintf(fd_str, sizeof(fd_str), "%d", pipe_fd[0]);
+        if (pipe_fd[0] != STDIN_FILENO) {
+            close(pipe_fd[0]);
+        }
 
         /* Відновлюємо маску сигналів перед викликом exec */
         sigset_t empty_mask;
@@ -338,11 +342,10 @@ ZavodErrorCode launch_workers(int pipe_fd[2], pid_t *out_pid1, pid_t *out_pid2) 
         sigprocmask(SIG_SETMASK, &empty_mask, NULL);
 
         /* Запуск виконуваного файлу робітника 1 */
-        execl("./worker1", "worker1", fd_str, NULL);
+        execl("./worker1", "worker1", NULL);
 
         /* Якщо execl повернувся — сталася помилка (наприклад, бінарник ще не зібрано) */
         perror("[РОБІТНИК 1 - ПОМИЛКА] Не вдалося виконати ./worker1 (execl)");
-        close(pipe_fd[0]);
         exit(EXIT_FAILURE);
     }
 
@@ -412,6 +415,8 @@ ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, i
 
     *out_passed = 0;
     *out_defects = 0;
+    g_pid2_reaped = 0;
+    g_pid2_saved_status = 0;
 
     printf("[КЕРІВНИК] Очікування та зчитування результатів тестування з черги повідомлень (msqid: %d)...\n", msqid);
     fflush(stdout);
@@ -439,9 +444,8 @@ ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, i
                 uint32_t serial = msg.metric.serial_number;
                 uint8_t score = msg.metric.quality_score;
 
-                printf("[КЕРІВНИК - РЕЗУЛЬТАТ] Виріб #%d: серійний номер = %u, оцінка якості = %u/100 (статус: %s)%s%s\n",
+                printf("[КЕРІВНИК - РЕЗУЛЬТАТ] Виріб #%d: серійний номер = %u, бал якості = %u/10%s%s\n",
                        *out_passed, serial, score,
-                       (score >= QUALITY_SCORE_DEFECT_THRESHOLD ? "СТАНДАРТ" : "БРАК"),
                        (msg.msg_text[0] != '\0' ? " | Опис: " : ""),
                        (msg.msg_text[0] != '\0' ? msg.msg_text : ""));
                 fflush(stdout);
@@ -459,13 +463,17 @@ ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, i
                     int status = 0;
                     pid_t wait_res = waitpid(pid2, &status, WNOHANG);
                     if (wait_res == pid2) {
-                        /* Робітник 2 завершив роботу. Дренуємо останні можливі залишки і виходимо */
+                        /* Робітник 2 завершив роботу. Фіксуємо статус, дренуємо і виходимо */
+                        g_pid2_reaped = 1;
+                        g_pid2_saved_status = status;
                         worker2_finished = true;
                         while (msgrcv(msqid, &msg, sizeof(struct msg_buffer) - sizeof(long), 0, IPC_NOWAIT) > 0) {
                             if (msg.msg_type == MSG_TYPE_METRIC) {
                                 (*out_passed)++;
-                                printf("[КЕРІВНИК - РЕЗУЛЬТАТ] Виріб #%d: серійний номер = %u, оцінка якості = %u/100\n",
-                                       *out_passed, msg.metric.serial_number, msg.metric.quality_score);
+                                printf("[КЕРІВНИК - РЕЗУЛЬТАТ] Виріб #%d: серійний номер = %u, бал якості = %u/10%s%s\n",
+                                       *out_passed, msg.metric.serial_number, msg.metric.quality_score,
+                                       (msg.msg_text[0] != '\0' ? " | Опис: " : ""),
+                                       (msg.msg_text[0] != '\0' ? msg.msg_text : ""));
                                 fflush(stdout);
                             }
                         }
@@ -540,7 +548,11 @@ ZavodErrorCode wait_and_print_summary(pid_t pid1, pid_t pid2, int total_count, i
 
     /* Очікування завершення Робітника 2 */
     if (pid2 > 0) {
-        if (waitpid(pid2, &status2, 0) == -1) {
+        bool already_reaped = (g_pid2_reaped != 0);
+        if (already_reaped) {
+            status2 = g_pid2_saved_status;
+        }
+        if (!already_reaped && waitpid(pid2, &status2, 0) == -1) {
             perror("[КЕРІВНИК - ПОМИЛКА] Помилка waitpid для Робітника 2");
             snprintf(worker2_status_str, sizeof(worker2_status_str), "Помилка очікування");
         } else {
@@ -600,6 +612,9 @@ void cleanup_ipc_resources(int msqid) {
     /* 2. Закриття та відв'язування семафора кімнати відпочинку */
     cleanup_break_semaphore();
 
+    /* 3. Видалення іменованого каналу FIFO */
+    unlink(FIFO_PATH);
+
     printf("[КЕРІВНИК] Усі системні IPC-ресурси успішно прибрано.\n");
     fflush(stdout);
 }
@@ -638,27 +653,35 @@ int run_supervisor(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    /* 4. Налаштування обробників сигналів та блокування перед fork */
+    /* 4. Підготовка іменованого каналу FIFO між робітниками (Issue #2 & #3) */
+    unlink(FIFO_PATH);
+    if (mkfifo(FIFO_PATH, 0666) == -1 && errno != EEXIST) {
+        perror("[КЕРІВНИК - ПОМИЛКА] Помилка створення каналу FIFO mkfifo");
+        cleanup_ipc_resources(msqid);
+        return EXIT_FAILURE;
+    }
+
+    /* 5. Налаштування обробників сигналів та блокування перед fork */
     if (setup_signal_handlers() != ZAVOD_SUCCESS) {
         cleanup_ipc_resources(msqid);
         return EXIT_FAILURE;
     }
 
-    /* 5. Створення неіменованого каналу pipe */
+    /* 6. Створення неіменованого каналу pipe */
     int pipe_fd[2];
     if (create_pipe(pipe_fd) != ZAVOD_SUCCESS) {
         cleanup_ipc_resources(msqid);
         return EXIT_FAILURE;
     }
 
-    /* 6. Породження дочірніх процесів через fork() */
+    /* 7. Породження дочірніх процесів через fork() */
     pid_t pid1 = 0, pid2 = 0;
     if (launch_workers(pipe_fd, &pid1, &pid2) != ZAVOD_SUCCESS) {
         cleanup_ipc_resources(msqid);
         return EXIT_FAILURE;
     }
 
-    /* 7. Очікування сигналів готовності від обох робітників */
+    /* 8. Очікування сигналів готовності від обох робітників */
     if (wait_for_workers_ready() != ZAVOD_SUCCESS) {
         fprintf(stderr, "[КЕРІВНИК - ПОМИЛКА] Збій під час синхронізації готовності.\n");
         kill(pid1, SIGTERM);
