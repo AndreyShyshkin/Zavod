@@ -13,6 +13,7 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -207,7 +208,7 @@ typedef struct {
  */
 typedef struct {
     uint32_t serial_number;  /**< Унікальний серійний номер виробу */
-    uint8_t quality_score;   /**< Кількісна оцінка якості (0..100) */
+    uint8_t quality_score;   /**< Кількісна оцінка якості (1..10) */
 } FinalMetric;
 
 /**
