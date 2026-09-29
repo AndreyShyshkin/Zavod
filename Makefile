@@ -71,15 +71,11 @@ asan: clean $(OBJ_DIR) $(TARGET) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_PARENT_BIN
 parent: $(TARGET)
 
 # Ціль для компіляції робітника 1 (перевіряючий, Issue #2)
-worker1: $(WORKER1_BIN)
-
 $(WORKER1_BIN): $(SRC_DIR)/worker1.c $(COMMON_OBJS)
 	$(CC) $(CFLAGS) $< $(COMMON_OBJS) -o $@ $(LDFLAGS)
 	@echo "Робітник 1 успішно зібраний: $(WORKER1_BIN)"
 
 # Ціль для компіляції робітника 2 (тестувальник, Issue #3)
-worker2: $(WORKER2_BIN)
-
 $(WORKER2_BIN): $(SRC_DIR)/worker2.c $(COMMON_OBJS)
 	$(CC) $(CFLAGS) $< $(COMMON_OBJS) -o $@ $(LDFLAGS)
 	@echo "Робітник 2 успішно зібраний: $(WORKER2_BIN)"
