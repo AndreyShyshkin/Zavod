@@ -40,7 +40,8 @@ COMMON_OBJS = $(OBJ_DIR)/semaphore_utils.o
 PARENT_OBJS = $(COMMON_OBJS) $(OBJ_DIR)/parent.o
 
 # Основна ціль за замовчуванням
-all: $(OBJ_DIR) $(TARGET)
+# Основна ціль за замовчуванням
+all: $(OBJ_DIR) $(TARGET) $(WORKER1_BIN) $(WORKER2_BIN)
 
 # Створення каталогу для об'єктних файлів
 $(OBJ_DIR):
@@ -63,29 +64,25 @@ $(TARGET): $(OBJ_DIR)/main.o $(PARENT_OBJS)
 # Збирання проєкту з увімкненим AddressSanitizer для пошуку переповнень і витоків
 asan: CFLAGS += $(ASAN_FLAGS)
 asan: LDFLAGS += $(ASAN_FLAGS)
-asan: clean $(OBJ_DIR) $(TARGET) $(TEST_PARENT_BIN) $(TEST_BIN) $(STRESS_BIN)
+asan: clean $(OBJ_DIR) $(TARGET) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_PARENT_BIN) $(TEST_BIN) $(STRESS_BIN)
 	@echo "Збирання з AddressSanitizer успішно завершено."
 
 # Ціль для батьківського процесу (керівник)
 parent: $(TARGET)
 
 # Ціль для компіляції робітника 1 (перевіряючий, Issue #2)
-worker1: $(COMMON_OBJS)
-	@if [ -f $(SRC_DIR)/worker1.c ]; then \
-		$(CC) $(CFLAGS) $(SRC_DIR)/worker1.c $(COMMON_OBJS) -o $(WORKER1_BIN) $(LDFLAGS); \
-		echo "Робітник 1 успішно зібраний: $(WORKER1_BIN)"; \
-	else \
-		echo "Файл $(SRC_DIR)/worker1.c очікується від колеги (Issue #2)."; \
-	fi
+worker1: $(WORKER1_BIN)
+
+$(WORKER1_BIN): $(SRC_DIR)/worker1.c $(COMMON_OBJS)
+	$(CC) $(CFLAGS) $< $(COMMON_OBJS) -o $@ $(LDFLAGS)
+	@echo "Робітник 1 успішно зібраний: $(WORKER1_BIN)"
 
 # Ціль для компіляції робітника 2 (тестувальник, Issue #3)
-worker2: $(COMMON_OBJS)
-	@if [ -f $(SRC_DIR)/worker2.c ]; then \
-		$(CC) $(CFLAGS) $(SRC_DIR)/worker2.c $(COMMON_OBJS) -o $(WORKER2_BIN) $(LDFLAGS); \
-		echo "Робітник 2 успішно зібраний: $(WORKER2_BIN)"; \
-	else \
-		echo "Файл $(SRC_DIR)/worker2.c очікується від колеги (Issue #3)."; \
-	fi
+worker2: $(WORKER2_BIN)
+
+$(WORKER2_BIN): $(SRC_DIR)/worker2.c $(COMMON_OBJS)
+	$(CC) $(CFLAGS) $< $(COMMON_OBJS) -o $@ $(LDFLAGS)
+	@echo "Робітник 2 успішно зібраний: $(WORKER2_BIN)"
 
 # Ціль для збирання тестів керівника (Issue #1)
 $(TEST_PARENT_BIN): $(TEST_DIR)/test_parent.c $(PARENT_OBJS)
@@ -100,14 +97,18 @@ $(STRESS_BIN): $(TEST_DIR)/test_break_stress.c $(COMMON_OBJS)
 	$(CC) $(CFLAGS) $^ -o $@ $(LDFLAGS)
 
 # Автоматичний запуск усіх інтеграційних та стрес-тестів
-test: $(TEST_PARENT_BIN) $(TEST_BIN) $(STRESS_BIN)
+test: $(TARGET) $(WORKER1_BIN) $(WORKER2_BIN) $(TEST_PARENT_BIN) $(TEST_BIN) $(STRESS_BIN)
 	@echo "\n>>> Запуск тестів оркестрації керівника (Issue #1)..."
 	./$(TEST_PARENT_BIN)
 	@echo "\n>>> Запуск базового тесту семафорів (Issue #4)..."
 	./$(TEST_BIN)
 	@echo "\n>>> Запуск стрес-тесту конкурентності (Issue #4)..."
 	./$(STRESS_BIN)
-	@echo "\n>>> Усі тести пройдено успішно!"
+	@echo "\n>>> Запуск наскрізного тесту лінії виробництва (10 деталей)..."
+	./$(TARGET) 10
+	@echo "\n>>> Валідація журналу перерв..."
+	./scripts/verify_logs.sh break_log.txt
+	@echo "\n>>> Усі тести та наскрізна перевірка пройдені успішно!"
 
 # Синонім для test
 run-tests: test
