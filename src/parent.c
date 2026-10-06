@@ -485,8 +485,9 @@ ZavodErrorCode read_results_from_queue(int msqid, pid_t pid2, int total_count, i
                     break;
                 }
 
-                /* Коротка пауза (10 мс) перед наступною перевіркою черги */
-                usleep(10000);
+                /* Коротка пауза (10 мс) за стандартом POSIX через nanosleep */
+                struct timespec pause_ts = { .tv_sec = 0, .tv_nsec = 10000000L };
+                nanosleep(&pause_ts, NULL);
             } else if (errno == EINTR) {
                 /* Системний виклик перервано сигналом */
                 continue;
